@@ -1,0 +1,162 @@
+---
+title: "Lung code"
+author: "Paul Tran"
+date: "4/19/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+figures: 
+representative umap, 
+heatmap of iterations showing samp clusters
+show groupings aren't study specific (table or colored umap)
+
+
+
+show study details (where study from, year),
+three major studies, keep only LUAD with gene expression data, TCGA voom, scale, merge, umap, dbscan
+
+#ideas
+validate single tcga 4 group model by combining all exp data compare sup model trained from tcga unsup to unsup of combined data. proves that the method can find generalizable groups
+
+change code for umap to subsample samples, add option for doing umap and dbscan together
+
+tcga by itself shows 4 groups. mixing all samples well shows 4 groups. the microarrays individually do not show the same 4 groups. probably bc tcga has higher proportion of rarer subtypes. rarer subtypes found both on unsup when combined with tcga (upsample) and on using sup trained from tcga. the subgroups identified from dir most likely more local structure, that may be found if tcga removed the satellite groups.
+
+## Lung Adenocarcinoma Meta-dataset
+
+### TCGA download
+HTSeq generated counts per million (cpm) data and clinical data were downloaded for 533 TCGA Lung Adenocarcinoma (LUAD)  primary tumors from the Genomic Data Commons (GDC) through the TCGABiolinks package. FFPE and duplicated samples were removed, leaving 509 samples. Of the 56943 genes mapped to GRCh38.p13, 41427 were removed because less than half the samples had a count of 1 or greater for these genes, leaving 15516 genes for downstream analysis. Voom was applied for log2 transformation and normalization of cpm data.
+
+### Lim download
+Lim et al combined gene expression data for 1118 non-small cell lung cancer (NSCLC) cases profiled using Affymetrix GeneChip Human Genome U133 Plus 2.0, which we downloaded directly through ArrayExpress data E-MTAB-6043. It combines data from 10 GEO datasets, GSE10245, GSE10445, GSE10799, GSE12667, GSE18842, GSE19188, GSE28571, GSE31210, GSE33356, GSE50081. We kept only the 632 LUAD cases.
+
+### NCI Director's Challenge download
+The Director's Challange Lung Adenocarcinoma microarray and clinical dataset, GSE68465, were downloaded from GEO using the "getGEO" function from the GEOQuery package. Log2 normalized data. Of the 462 cases downloaded, the 443 LUAD cases were kept for downstream analysis. 22283 probes were reduced to 13516 which had the highest average intensity of all probes covering the same gene.
+
+### Combine Data
+6511 genes were found to be in common across the three LUAD datasets (TCGA, Lim, and Director). Each dataset was individually centered and scaled and then merged into a combined dataset with 1584 cases. No batch effects were identified on visual inspection of PCA plot.
+
+The phenotype data was manually combined to supplement the gene expression data. Stage data used AJCC or was converted to AJCC from TNM. Then all AJCC stage was converted to a simplified four stage scale (1, 2, 3, 4).This was done since many of the cases were not staged with the letter designation, so we kept the most patients by converting staging to the most simple form.
+the largest lung adenocarcinoma gene expression meta-dataset reported.
+
+## Density-based UMAP algorithm
+We searched the parameter space of the UMAP algorithm in a grid pattern to optimize the number of random genes, number of neighbors for K-nearest neighbors, and minimum distance. 5000 random genes, 20 nearest neighbors, 0.1 minimum distance, manhattan distance metric. These UMAP parameters were kept for 1000 iterations, each with a random subset of 5000 genes.
+
+umap tcga and dir
+gene 5000, nn 20, md 0.1
+
+TCGA k=20, eps0.65, iter 70
+sup clust div >7 = NA
+TCGA1 347, 2 67, 3 44, 4 42, NA 9
+
+dir 
+
+
+Density based clustering was performed on the 1000 UMAP iterations using the DBSCAN algorithm from the FPC package with empiricly determined parameters k neighbors 50 and distance 0.6. 16 iterations identified 5 clusters, 328 has 4 clusters, 409 had 3 clusters, 241 had 2 clusters, and 1 had 6 clusters. The iterations which identified 3 or 4 clusters were used for further clustering.
+
+The samples were grouped into 6 clusters based on the 3 and 4 cluster iterations. However, the 59 samples from two of these clusters did not show a clear iteration clustering pattern. These samples were classified ambiguous. Of the remaining 1525 samples, an additional 192 were identified ambiguous based on our cluster cohesiveness metric cutoff value of 20. The cluster cohesiveness metric is a value assigned per sample to determine how well each cluster iteration agrees with the others. The metric is calculated as the sum of the differences for each adjacent cluster. A higher value reflects less cluster cohesiveness while a smaller value (closer to 0) reflects more closer cohesiveness.
+
+Thus, out of the 1333 classified samples, 1085 were assigned group LUAD1, 125 LUAD2, 88 LUAD3, and 49 LUAD4.
+
+## Supervised classification 
+### Wilkerson et al gene expression subtypes
+The TCGA classified 227 cases into the Wilkerson et al gene expression subtypes 87 terminal respiratory unit (TRU), 63 proximal proliferative (PP), and 77 proximal inflammatory (PI). The groups are defined based on centroids for 506 genes from the PAM algorithm. We downloaded the centroids (http://cancer.unc.edu/nhayes/publications/adenocarcinoma.2012/) and calculated the pearson correlation coefficients between the centroids and the 227 classified TCGA LUAD cases for 447 genes available out of the 506 gene centroids. A multinomial log-linear calibration model with then fit using neural networks on the peason correlation data for sample classification using 75% of the TCGA data. Average model accuracy across 10 fold cross validation repeated 5 times was 0.91 (95% CI 0.89-0.92). Holdout validation on the remaining 25% (55 samples) yielded an accuracy of 0.96 (95% CI 0.87-0.996). Paiwise correlations and class prediction using the multinomial model was completed for all remaining unclassified TCGA cases as well as the Lim and Director microarray datasets. In the full metadataset classification, 578 were PI, 460 PP, and 546 TRU. The classes were evenly distributed across the three gene expression datasets (Chi-squared p=0.75).
+
+multinom 10fold 0.9140278 (0.8995597 0.9284959); test 0.9636 (0.8747, 0.9956)
+glmnet 10fold 0.9033007 (0.8839697 0.9226316); test 0.9273 (0.8241, 0.9798)
+
+### DBU class
+tcga 500 of 509 groups, split 377 train 123 test
+tcga pam threshold 0.10
+test accuracy  0.8862 (0.8164, 0.9364)
+10-fold cv 5 repeats 0.8601023 (0.8462112 0.8739933)
+
+tcga glmnet alpha = 0.1 and lambda = 0.06027216. 
+  test accuracy 0.9431  (0.8863, 0.9768)
+  10-fold cv 5 repeats 0.9390914 (0.9303475 0.9478353)
+  gene no 390, 263, 248, 194
+  auprc 0.996,0.811, 0.992, 0.893. micro 0.976, macro 0.906
+
+dir 443 to 408, split 308, 100
+tcga pam threshold 0.01, 
+test Accuracy : 0.95 (0.8872, 0.9836)
+10-fold cv 5 repeats 0.9040376 (0.8904990 0.9175762)
+
+
+tcga glmnet alpha = 0.1 and lambda = 0.02114978. 
+test Accuracy : 0.96 (0.9007, 0.989)
+10-fold cv 5 repeats 0.9205753 (0.9072169 0.9339336)
+auroc 0.997, 1, 0.999, 1
+auprc 0.998, 1, 0.99, 1, macro 0.98, micro 0.99
+gene no 486, 315, 274, 337
+
+The LUAD meta-dataset was divided into a training dataset with 75% of TCGA data (317), a holdout validation dataset with the remaining 25% of TCGA data (103), a test set 1 with all Lim data (566), and a test set 2 with all Director data (361). Training dataset was used to train and tune a PAM model and an elastic net model as implemented in the glmnet package. Average 5 times repeated 10-fold cross validation accuracy was 0.92 (0.91-0.93) for the best PAM model and 0.97 (0.97-0.98) for the best elastic net model. Holdout validation accuracy was 0.89 (0.82-0.95) and 0.99 (0.95-0.9998), respectively. Thus, the elastic net model, with alpha = 0.1 and lambda = 0.06167516 was used for further analysis. For the Lim test dataset 1, model accuracy was 0.98 (0.97-0.99), macro-average area under the precision-recall curve 
+(AUPRC) was 0.93, and micro-average AUPRC was 0.99. For the Director test dataset 2, model accuracy was 0.97 (0.95-0.99), macro-average AUPRC was 0.97, and micro-average AUPRC was 0.997. All LUAD gene expression metaset data were classified using this model, and 1236 were LUAD_1, 149 LUAD_2, 111 LUAD_3, and 88 LUAD_4.
+
+
+# Results
+
+substructure seen for each dataset, but to maximize 
+
+LUAD gene expression data from TCGA RNASeq and 11 GEO microarray datasets were merged and normalized into one meta-dataset with 1584 samples and 6511 genes (Supplemental Figure 1 PCA plot, Table 1 Clinical Data). Dimension reduction was then applied to the meta-dataset using the UMAP algorithm for 1000 iterations each time with a random subset of 5000 genes (Figure 1A). The UMAP iterations were clustered using DBSCAN. Consensus clustering of the UMAP and DBSCAN iterations led to classification of 1333 samples, 1085 were assigned group LUAD1, 125 LUAD2, 88 LUAD3, and 49 LUAD4 (Figure 1B). All groups had similar contributions from the three major datasets, indicating that these groups are unlikely to be batch effects from one study.
+
+A supervised classifier was developed from the TCGA RNASeq data and validated on the microarray datasets.
+
+We validated a classifier for Wilkerson et al LUAD transcriptomic subgroups on a subset of the TCGA data with reported subtypes and then classified all samples in our dataset. 
+
+Our transcriptomic classifier is unique from the Wilkerson et al classification. Most Wilkerson classified PI and TRU cases were DBU classified LUAD1, while LUAD2, LUAD3, LUAD4, and a subset of LUAD1 were Wilkerson classified PP. 
+
+On survival analysis, LUAD4 is associated with worse overall survival prognosis independent of Wilkerson et al classification or other clinicopathologic variables.
+
+We next characterized the DBU subgroups and found LUAD4 is similar to lung squamous cell carcinoma (LUSC). LUAD4 upregulates the keratinization, squamous cell differentiation, cellular proliferation. LUAD4 is associated with mutations, methylations, copy number aberations. LUAD4 is not associated with markers of response to current LUAD drug therapy (EGFR, ROS, ALK, MET, PDL1, MSI) 
+
+
+
+
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+# Gene expression aligned against hg38
+library(TCGAbiolinks)
+library(DT)
+library(SummarizedExperiment)
+query <- GDCquery(project = "TCGA-GBM",
+                  data.category = "Transcriptome Profiling",
+                  data.type = "Gene Expression Quantification", 
+                  workflow.type = "HTSeq - FPKM-UQ",
+                  barcode = c("TCGA-14-0736-02A-01R-2005-01", "TCGA-06-0211-02A-02R-2005-01"))
+GDCdownload(query)
+data <- GDCprepare(query)
+
+datatable(as.data.frame(colData(data)), 
+              options = list(scrollX = TRUE, keys = TRUE, pageLength = 5), 
+              rownames = FALSE)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+# mRNA pipeline: https://gdc-docs.nci.nih.gov/Data/Bioinformatics_Pipelines/Expression_mRNA_Pipeline/
+query.exp.hg38 <- GDCquery(project = "TCGA-GBM", 
+                  data.category = "Transcriptome Profiling", 
+                  data.type = "Gene Expression Quantification", 
+                  workflow.type = "HTSeq - FPKM-UQ",
+                  barcode =  c("TCGA-14-0736-02A-01R-2005-01", "TCGA-06-0211-02A-02R-2005-01"))
+GDCdownload(query.exp.hg38)
+expdat <- GDCprepare(query = query.exp.hg38,
+                     save = TRUE, 
+                     save.filename = "exp.rda")
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
